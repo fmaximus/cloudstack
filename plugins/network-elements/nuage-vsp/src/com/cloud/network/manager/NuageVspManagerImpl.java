@@ -305,6 +305,7 @@ public class NuageVspManagerImpl extends ManagerBase implements NuageVspManager,
 
             if (matchingNuageVspDevice == null) {
                 auditDomainsOnVsp((HostVO) host, true, false);
+                initNuageVspVpcOffering();
             }
 
             return nuageVspDevice;
@@ -695,7 +696,9 @@ public class NuageVspManagerImpl extends ManagerBase implements NuageVspManager,
         initMessageBusListeners();
         initNuageVspResourceListeners();
         initNuageNetworkOffering();
-        initNuageVspVpcOffering();
+        if (!_nuageVspDao.listAll().isEmpty()) {
+            initNuageVspVpcOffering();
+        }
         Status.getStateMachine().registerListener(this);
         return true;
     }
@@ -855,7 +858,7 @@ public class NuageVspManagerImpl extends ManagerBase implements NuageVspManager,
                         s_logger.debug("Creating default Nuage VPC offering " + nuageVPCOfferingName);
                     }
 
-                    createVpcOffering(nuageVPCOfferingName, nuageVPCOfferingDisplayText, NUAGE_VSP_VPC_SERVICE_MAP, true, VpcOffering.State.Enabled, null);
+                    createVpcOffering(nuageVPCOfferingName, nuageVPCOfferingDisplayText, NUAGE_VSP_VPC_SERVICE_MAP, VpcOffering.State.Enabled, null);
                 } else {
                     updateVpcOffering(offering, NUAGE_VSP_VPC_SERVICE_MAP);
                 }
@@ -864,13 +867,13 @@ public class NuageVspManagerImpl extends ManagerBase implements NuageVspManager,
     }
 
     @DB
-    protected VpcOffering createVpcOffering(final String name, final String displayText, final Map<Network.Service, Set<Network.Provider>> svcProviderMap, final boolean isDefault,
-                                            final VpcOffering.State state, final Long serviceOfferingId) {
+    protected VpcOffering createVpcOffering(final String name, final String displayText, final Map<Network.Service, Set<Network.Provider>> svcProviderMap,
+            final VpcOffering.State state, final Long serviceOfferingId) {
         return Transaction.execute(new TransactionCallback<VpcOffering>() {
             @Override
             public VpcOffering doInTransaction(TransactionStatus status) {
                 // create vpc offering object
-                VpcOfferingVO offering = new VpcOfferingVO(name, displayText, isDefault, serviceOfferingId, false, false);
+                VpcOfferingVO offering = new VpcOfferingVO(name, displayText, false, serviceOfferingId, false, false);
 
                 if (state != null) {
                     offering.setState(state);
