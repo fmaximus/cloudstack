@@ -475,10 +475,11 @@
           </connectors>
           <webXml>${project.build.directory}/generated-webapp/WEB-INF/web.xml</webXml>
           <webAppSourceDirectory>${project.build.directory}/generated-webapp</webAppSourceDirectory>
-          <webAppConfig>
+          <webApp>
             <contextPath>/client</contextPath>
             <extraClasspath>${project.build.directory}/utilities/scripts/db/;${project.build.directory}/utilities/scripts/db/db/</extraClasspath>
-          </webAppConfig>
+            <webInfIncludeJarPattern>^$</webInfIncludeJarPattern>
+          </webApp>
           
           <systemProperties>
               <systemProperty>
