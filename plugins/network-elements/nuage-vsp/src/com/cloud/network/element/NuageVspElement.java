@@ -24,25 +24,23 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-
 import javax.annotation.Nullable;
 import javax.inject.Inject;
 import javax.naming.ConfigurationException;
 
+import org.apache.commons.collections.CollectionUtils;
+import org.apache.log4j.Logger;
+import com.google.common.base.Function;
 import com.google.common.base.Preconditions;
+import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.Lists;
+import com.google.common.collect.Sets;
+
 import net.nuage.vsp.acs.client.api.model.VspAclRule;
 import net.nuage.vsp.acs.client.api.model.VspDhcpDomainOption;
 import net.nuage.vsp.acs.client.api.model.VspNetwork;
 import net.nuage.vsp.acs.client.api.model.VspStaticNat;
-
-import org.apache.commons.collections.CollectionUtils;
-import org.apache.log4j.Logger;
-
-import com.google.common.base.Function;
-import com.google.common.collect.ImmutableMap;
-import com.google.common.collect.Lists;
-import com.google.common.collect.Sets;
 
 import org.apache.cloudstack.api.InternalIdentity;
 import org.apache.cloudstack.framework.config.dao.ConfigurationDao;
@@ -50,7 +48,6 @@ import org.apache.cloudstack.network.ExternalNetworkDeviceManager;
 import org.apache.cloudstack.network.topology.NetworkTopologyContext;
 import org.apache.cloudstack.resourcedetail.VpcDetailVO;
 import org.apache.cloudstack.resourcedetail.dao.VpcDetailsDao;
-
 import com.cloud.agent.AgentManager;
 import com.cloud.agent.api.Answer;
 import com.cloud.agent.api.StartupCommand;
@@ -89,6 +86,7 @@ import com.cloud.network.dao.IPAddressDao;
 import com.cloud.network.dao.IPAddressVO;
 import com.cloud.network.dao.NetworkDao;
 import com.cloud.network.dao.NetworkServiceMapDao;
+import com.cloud.network.dao.NetworkVO;
 import com.cloud.network.dao.NuageVspDao;
 import com.cloud.network.dao.PhysicalNetworkDao;
 import com.cloud.network.dao.PhysicalNetworkVO;
@@ -289,6 +287,13 @@ public class NuageVspElement extends AdapterBase implements ConnectivityProvider
             return false;
         }
 
+        if (!_nuageVspEntityBuilder.usesVirtualRouter(offering.getId())) {
+            // Update broadcast uri if VR is no longer used
+            NetworkVO networkToUpdate = _networkDao.findById(network.getId());
+            String broadcastUriStr = networkToUpdate.getUuid() + "/null";
+            networkToUpdate.setBroadcastUri(Networks.BroadcastDomainType.Vsp.toUri(broadcastUriStr));
+            _networkDao.update(network.getId(), networkToUpdate);
+        }
 
         VspNetwork vspNetwork = _nuageVspEntityBuilder.buildVspNetwork(network);
         List<VspAclRule> ingressFirewallRules = getFirewallRulesToApply(network, FirewallRule.TrafficType.Ingress);
@@ -544,10 +549,11 @@ public class NuageVspElement extends AdapterBase implements ConnectivityProvider
         List<VlanVO> vlans = _vlanDao.listByZone(newVlan.getDataCenterId());
         if (CollectionUtils.isNotEmpty(vlans)) {
             boolean newVlanUnderlay = NuageVspUtil.isUnderlayEnabledForVlan(_vlanDetailsDao, newVlan);
+            final String newCidr = NetUtils.getCidrFromGatewayAndNetmask(newVlan.getVlanGateway(), newVlan.getVlanNetmask());
+
             for (VlanVO vlan : vlans) {
                 if (vlan.getId() == newVlan.getId()) continue;
 
-                final String newCidr = NetUtils.getCidrFromGatewayAndNetmask(newVlan.getVlanGateway(), newVlan.getVlanNetmask());
                 final String existingCidr = NetUtils.getCidrFromGatewayAndNetmask(vlan.getVlanGateway(), vlan.getVlanNetmask());
 
                 NetUtils.SupersetOrSubset supersetOrSubset = NetUtils.isNetowrkASubsetOrSupersetOfNetworkB(newCidr, existingCidr);

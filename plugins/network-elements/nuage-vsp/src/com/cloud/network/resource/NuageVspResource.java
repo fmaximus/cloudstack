@@ -21,8 +21,10 @@ package com.cloud.network.resource;
 
 import java.util.Map;
 import java.util.concurrent.ExecutionException;
-
 import javax.naming.ConfigurationException;
+
+import org.apache.log4j.Logger;
+import com.google.common.base.Strings;
 
 import net.nuage.vsp.acs.client.api.NuageVspAclClient;
 import net.nuage.vsp.acs.client.api.NuageVspApiClient;
@@ -32,10 +34,6 @@ import net.nuage.vsp.acs.client.api.NuageVspManagerClient;
 import net.nuage.vsp.acs.client.api.NuageVspPluginClientLoader;
 import net.nuage.vsp.acs.client.api.model.VspHost;
 import net.nuage.vsp.acs.client.exception.NuageVspException;
-
-import org.apache.log4j.Logger;
-
-import com.google.common.base.Strings;
 
 import com.cloud.agent.IAgentControl;
 import com.cloud.agent.api.Answer;
@@ -73,7 +71,7 @@ public class NuageVspResource extends ManagerBase implements ServerResource {
 
 
         if (!newVspHost.getApiVersion().isSupported()) {
-            s_logger.warn(String.format("[UPGRADE] API version %s of Nuage Vsp Device %s should be updated.", _vspHost.getApiVersion(), configuration.hostName()));
+            s_logger.warn(String.format("[UPGRADE] API version %s of Nuage Vsp Device %s should be updated.", newVspHost.getApiVersion(), configuration.hostName()));
         }
 
         _guid = configuration.guid();
@@ -172,7 +170,7 @@ public class NuageVspResource extends ManagerBase implements ServerResource {
             return wrapper.execute(cmd, this);
         } catch (final Exception e) {
             if (s_logger.isDebugEnabled()) {
-                s_logger.debug("Received unsupported command " + cmd.toString());
+                s_logger.debug("Received unsupported command " + cmd.toString(), e);
             }
             return Answer.createUnsupportedCommandAnswer(cmd);
         }

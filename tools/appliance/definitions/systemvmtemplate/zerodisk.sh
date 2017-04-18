@@ -24,7 +24,7 @@ function cleanup_veewee() {
   # this has to be here since it is the last file to run (and we remove ourselves)
   rm -fv /root/*.iso
   rm -fv /root/{apt_upgrade,authorized_keys,build_time,cleanup,install_systemvm_packages,zerodisk}.sh
-  rm -fv /root/configure_{acpid,conntrack,grub,locale,login,networking,systemvm_services}.sh
+  rm -fv /root/configure_{acpid,conntrack,grub,locale,login,networking,proxy,systemvm_services}.sh
   rm -fv .veewee_version .veewee_params .vbox_version
 }
 

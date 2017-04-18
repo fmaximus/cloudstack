@@ -76,14 +76,15 @@ config = {
     :postinstall_files => [
         # basic minimal vm creation
         'build_time.sh',
+        'configure_proxy.sh',
         'apt_upgrade.sh',
         'configure_grub.sh',
         'configure_locale.sh',
         'configure_login.sh',
-        'configure_networking.sh',
         'configure_acpid.sh',
         # turning it into a systemvm
         'install_systemvm_packages.sh',
+        'configure_networking.sh',
         'configure_conntrack.sh',
         '../../cloud_scripts_shar_archive.sh',
         'configure_systemvm_services.sh',

@@ -253,6 +253,9 @@ function create_definition() {
   fi
 
   if [ "${appliance}" != "${appliance_build_name}" ]; then
+    if [ -d "definitions/${appliance_build_name}" ]; then
+      rm -rf "definitions/${appliance_build_name}"
+    fi
     cp -r "definitions/${appliance}" "definitions/${appliance_build_name}"
     set +e
     if [ ! -z "${version}" ]; then
@@ -263,6 +266,15 @@ function create_definition() {
       # ssh key lines can contain /
       sed ${sed_regex_option} -i -e "s|^key=.+|key=\"${ssh_key}\"|" \
           "definitions/${appliance_build_name}/authorized_keys.sh"
+    fi
+    if [ ! -z "${http_proxy}" ]; then
+    sed ${sed_regex_option} -i -e "7,8s#\$#${http_proxy}#" \
+        "definitions/${appliance_build_name}/configure_proxy.sh"
+    sed -i -e "/'<Enter>'/i\\
+        'http_proxy=${http_proxy} '," \
+        "definitions/${appliance_build_name}/definition.rb"
+    sed ${sed_regex_option} -i -e "s#^d-i mirror/http/proxy string.*#d-i mirror/http/proxy string ${http_proxy}/#" \
+        "definitions/${appliance_build_name}/preseed.cfg"
     fi
     set -e
     add_on_exit rm -rf "definitions/${appliance_build_name}"
@@ -474,7 +486,7 @@ function ovm_export() {
 
 function kvm_export() {
   set +e
-  which faketime >/dev/null 2>&1 && which vhd-util >/dev/null 2>&1
+  which qemu-img >/dev/null 2>&1
   local result=$?
   set -e
   if [ ${result} == 0 ]; then

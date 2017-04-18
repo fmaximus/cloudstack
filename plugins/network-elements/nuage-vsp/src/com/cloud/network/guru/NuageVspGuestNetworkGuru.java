@@ -25,9 +25,25 @@ import java.util.Set;
 
 import javax.inject.Inject;
 
+import net.nuage.vsp.acs.client.api.model.VspDhcpDomainOption;
+import net.nuage.vsp.acs.client.api.model.VspDhcpVMOption;
+import net.nuage.vsp.acs.client.api.model.VspDomain;
+import net.nuage.vsp.acs.client.api.model.VspNetwork;
+import net.nuage.vsp.acs.client.api.model.VspNic;
+import net.nuage.vsp.acs.client.api.model.VspStaticNat;
+import net.nuage.vsp.acs.client.api.model.VspVm;
+
+import org.apache.log4j.Logger;
+
+import com.google.common.base.Strings;
+import com.google.common.collect.FluentIterable;
+import com.google.common.collect.Iterables;
+import com.google.common.collect.LinkedListMultimap;
+import com.google.common.collect.Lists;
+import com.google.common.collect.Maps;
+
 import org.apache.cloudstack.resourcedetail.VpcDetailVO;
 import org.apache.cloudstack.resourcedetail.dao.VpcDetailsDao;
-import org.apache.log4j.Logger;
 
 import com.cloud.agent.AgentManager;
 import com.cloud.agent.api.Answer;
@@ -40,6 +56,7 @@ import com.cloud.configuration.ConfigurationManager;
 import com.cloud.dc.DataCenter;
 import com.cloud.dc.DataCenter.NetworkType;
 import com.cloud.dc.VlanVO;
+import com.cloud.dc.dao.VlanDetailsDao;
 import com.cloud.deploy.DeployDestination;
 import com.cloud.deploy.DeploymentPlan;
 import com.cloud.domain.dao.DomainDao;
@@ -71,8 +88,10 @@ import com.cloud.user.Account;
 import com.cloud.user.AccountVO;
 import com.cloud.user.dao.AccountDao;
 import com.cloud.util.NuageVspEntityBuilder;
+import com.cloud.util.NuageVspUtil;
 import com.cloud.utils.StringUtils;
 import com.cloud.utils.db.DB;
+import com.cloud.utils.exception.CloudRuntimeException;
 import com.cloud.utils.net.Ip;
 import com.cloud.vm.Nic;
 import com.cloud.vm.NicProfile;
@@ -82,20 +101,6 @@ import com.cloud.vm.VMInstanceVO;
 import com.cloud.vm.VirtualMachine;
 import com.cloud.vm.VirtualMachineProfile;
 import com.cloud.vm.dao.VMInstanceDao;
-import com.google.common.base.Strings;
-import com.google.common.collect.FluentIterable;
-import com.google.common.collect.Iterables;
-import com.google.common.collect.LinkedListMultimap;
-import com.google.common.collect.Lists;
-import com.google.common.collect.Maps;
-
-import net.nuage.vsp.acs.client.api.model.VspDhcpDomainOption;
-import net.nuage.vsp.acs.client.api.model.VspDhcpVMOption;
-import net.nuage.vsp.acs.client.api.model.VspDomain;
-import net.nuage.vsp.acs.client.api.model.VspNetwork;
-import net.nuage.vsp.acs.client.api.model.VspNic;
-import net.nuage.vsp.acs.client.api.model.VspStaticNat;
-import net.nuage.vsp.acs.client.api.model.VspVm;
 
 public class NuageVspGuestNetworkGuru extends GuestNetworkGuru {
     public static final Logger s_logger = Logger.getLogger(NuageVspGuestNetworkGuru.class);
@@ -128,6 +133,8 @@ public class NuageVspGuestNetworkGuru extends GuestNetworkGuru {
     NetworkDetailsDao _networkDetailsDao;
     @Inject
     VpcDetailsDao _vpcDetailsDao;
+    @Inject
+    VlanDetailsDao _vlanDetailsDao;
 
     public NuageVspGuestNetworkGuru() {
         super();
@@ -201,6 +208,24 @@ public class NuageVspGuestNetworkGuru extends GuestNetworkGuru {
             }
 
             VspNetwork vspNetwork = _nuageVspEntityBuilder.buildVspNetwork(implemented);
+
+            if (vspNetwork.isShared()) {
+                Boolean previousUnderlay= null;
+                for (VlanVO vlan : _vlanDao.listVlansByNetworkId(networkId)) {
+                    boolean underlay = NuageVspUtil.isUnderlayEnabledForVlan(_vlanDetailsDao, vlan);
+                    if (previousUnderlay == null || underlay == previousUnderlay) {
+                        previousUnderlay = underlay;
+                    } else {
+                        throw new CloudRuntimeException("Mixed values for the underlay flag for IP ranges in the same subnet is not supported");
+                    }
+                }
+                if (previousUnderlay != null) {
+                    vspNetwork = new VspNetwork.Builder().fromObject(vspNetwork)
+                            .vlanUnderlay(previousUnderlay)
+                            .build();
+                }
+            }
+
             String tenantId = context.getDomain().getName() + "-" + context.getAccount().getAccountId();
             String broadcastUriStr = implemented.getUuid() + "/" + vspNetwork.getVirtualRouterIp();
             implemented.setBroadcastUri(Networks.BroadcastDomainType.Vsp.toUri(broadcastUriStr));
@@ -320,6 +345,16 @@ public class NuageVspGuestNetworkGuru extends GuestNetworkGuru {
             if (vm.getType() == VirtualMachine.Type.DomainRouter && network.getState() != State.Implementing) {
                 updateDhcpOptionsForExistingVms(network, nuageVspHost, vspNetwork, networkHasDns, networkHasDnsCache);
             }
+            // Update broadcast Uri to enable VR ip update
+            if (!network.getBroadcastUri().getPath().substring(1).equals(vspNetwork.getVirtualRouterIp())) {
+                NetworkVO networkToUpdate = _networkDao.findById(network.getId());
+                String broadcastUriStr = networkToUpdate.getUuid() + "/" + vspNetwork.getVirtualRouterIp();
+                networkToUpdate.setBroadcastUri(Networks.BroadcastDomainType.Vsp.toUri(broadcastUriStr));
+                _networkDao.update(network.getId(), networkToUpdate);
+                if (network instanceof NetworkVO) {
+                    ((NetworkVO) network).setBroadcastUri(networkToUpdate.getBroadcastUri());
+                }
+            }
 
             nic.setBroadcastUri(network.getBroadcastUri());
             nic.setIsolationUri(network.getBroadcastUri());
@@ -401,8 +436,15 @@ public class NuageVspGuestNetworkGuru extends GuestNetworkGuru {
         }
     }
 
+
+    private boolean isServiceProvidedByVR(Network network, Network.Service service ) {
+        return (_networkModel.areServicesSupportedInNetwork(network.getId(), service) &&
+                ( _networkModel.isProviderSupportServiceInNetwork(network.getId(), service,  Network.Provider.VirtualRouter) ||
+                        _networkModel.isProviderSupportServiceInNetwork(network.getId(), service,  Network.Provider.VPCVirtualRouter)));
+    }
+
     private void checkMultipleSubnetsCombinedWithUseData(Network network) {
-        if (_ntwkOfferingSrvcDao.listServicesForNetworkOffering(network.getNetworkOfferingId()).contains(Network.Service.UserData.getName())) {
+        if (isServiceProvidedByVR(network, Network.Service.UserData)) {
             List<VlanVO> vlanVOs = _vlanDao.listVlansByNetworkId(network.getId());
             if (vlanVOs.size() > 1) {
                 VlanVO vlanVoItem = vlanVOs.get(0);

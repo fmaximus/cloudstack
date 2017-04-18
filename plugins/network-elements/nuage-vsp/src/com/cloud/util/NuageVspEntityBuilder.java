@@ -25,14 +25,30 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
-
 import javax.annotation.Nullable;
 import javax.inject.Inject;
 
-import org.apache.cloudstack.framework.config.dao.ConfigurationDao;
 import org.apache.commons.lang.StringUtils;
 import org.apache.log4j.Logger;
+import com.google.common.base.Function;
+import com.google.common.base.Predicate;
+import com.google.common.collect.Iterables;
+import com.google.common.collect.Lists;
+import com.google.common.collect.Maps;
 
+import net.nuage.vsp.acs.client.api.model.VspAclRule;
+import net.nuage.vsp.acs.client.api.model.VspAddressRange;
+import net.nuage.vsp.acs.client.api.model.VspDhcpDomainOption;
+import net.nuage.vsp.acs.client.api.model.VspDhcpVMOption;
+import net.nuage.vsp.acs.client.api.model.VspDomain;
+import net.nuage.vsp.acs.client.api.model.VspDomainCleanUp;
+import net.nuage.vsp.acs.client.api.model.VspNetwork;
+import net.nuage.vsp.acs.client.api.model.VspNic;
+import net.nuage.vsp.acs.client.api.model.VspStaticNat;
+import net.nuage.vsp.acs.client.api.model.VspVm;
+import net.nuage.vsp.acs.client.common.model.Pair;
+
+import org.apache.cloudstack.framework.config.dao.ConfigurationDao;
 import com.cloud.dc.Vlan;
 import com.cloud.dc.VlanVO;
 import com.cloud.dc.dao.VlanDao;
@@ -66,23 +82,7 @@ import com.cloud.vm.NicVO;
 import com.cloud.vm.VMInstanceVO;
 import com.cloud.vm.VirtualMachine;
 import com.cloud.vm.dao.VMInstanceDao;
-import com.google.common.base.Function;
-import com.google.common.base.Predicate;
-import com.google.common.collect.Iterables;
-import com.google.common.collect.Lists;
-import com.google.common.collect.Maps;
 
-import net.nuage.vsp.acs.client.api.model.VspAclRule;
-import net.nuage.vsp.acs.client.api.model.VspAddressRange;
-import net.nuage.vsp.acs.client.api.model.VspDhcpDomainOption;
-import net.nuage.vsp.acs.client.api.model.VspDhcpVMOption;
-import net.nuage.vsp.acs.client.api.model.VspDomain;
-import net.nuage.vsp.acs.client.api.model.VspDomainCleanUp;
-import net.nuage.vsp.acs.client.api.model.VspNetwork;
-import net.nuage.vsp.acs.client.api.model.VspNic;
-import net.nuage.vsp.acs.client.api.model.VspStaticNat;
-import net.nuage.vsp.acs.client.api.model.VspVm;
-import net.nuage.vsp.acs.client.common.model.Pair;
 
 public class NuageVspEntityBuilder {
     private static final Logger s_logger = Logger.getLogger(NuageVspEntityBuilder.class);
@@ -186,7 +186,6 @@ public class NuageVspEntityBuilder {
                         return new VspAddressRange.Builder().gateway(vlanVO.getVlanGateway()).netmask(vlanVO.getVlanNetmask()).build();
                     }
                 });
-
                 vspNetworkBuilder.networkType(VspNetwork.NetworkType.Shared).addressRanges(vspAddressRanges);
             } else if (_networkOfferingServiceMapDao.areServicesSupportedByNetworkOffering(network.getNetworkOfferingId(), Network.Service.SourceNat)
                     || _networkOfferingServiceMapDao.areServicesSupportedByNetworkOffering(network.getNetworkOfferingId(), Network.Service.StaticNat)) {
@@ -235,9 +234,11 @@ public class NuageVspEntityBuilder {
             }
         });
 
+        boolean underlayEnabled = NuageVspUtil.isUnderlayEnabledForVlan(_vlanDetailsDao, matchingVlan);
         return new VspNetwork.Builder().fromObject(vspNetwork)
                 .gateway(matchingVlan.getVlanGateway())
                 .cidr(NetUtils.getCidrFromGatewayAndNetmask(matchingVlan.getVlanGateway(), matchingVlan.getVlanNetmask()))
+                .vlanUnderlay(underlayEnabled)
                 .build();
     }
 
@@ -290,7 +291,9 @@ public class NuageVspEntityBuilder {
     }
 
     private String getVirtualRouterIP(Network network, List<Pair<String, String>> ipAddressRanges) throws InsufficientVirtualNetworkCapacityException {
-        if (network.getBroadcastUri() != null) {
+        if (network.getBroadcastUri() != null
+                && network.getBroadcastUri().getPath() != null
+                && !network.getBroadcastUri().getPath().substring(1).equals("null") ) {
             return network.getBroadcastUri().getPath().substring(1);
         }
 
@@ -316,11 +319,7 @@ public class NuageVspEntityBuilder {
                     network.getId());
         }
 
-        String virtualRouterIp = lowestIpAddressRange.getLeft();
-        long lowestIp = NetUtils.ip2Long(lowestIpAddressRange.getLeft());
-        lowestIp = lowestIp + 1;
-        lowestIpAddressRange.setLeft(NetUtils.long2Ip(lowestIp));
-        return virtualRouterIp;
+        return lowestIpAddressRange.getLeft();
     }
 
     public VspVm buildVspVm(VirtualMachine vm, Network network) {

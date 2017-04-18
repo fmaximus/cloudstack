@@ -73,7 +73,8 @@ function install_packages() {
     python-flask \
     haproxy \
     radvd \
-    sharutils
+    sharutils \
+    genisoimage
 
   ${apt_get} -t wheezy-backports install keepalived irqbalance open-vm-tools qemu-guest-agent
   ${apt_get} -t wheezy-backports install strongswan libcharon-extra-plugins libstrongswan-extra-plugins
@@ -95,7 +96,10 @@ function install_packages() {
   fi
 
   # Install OpenJDK8 pkgs maintained by Azul
-  apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys 0x219BD9C9
+  if [ ! -z "${http_proxy}" ]; then
+    keyserver_options="--keyserver-options http-proxy=$http_proxy"
+  fi
+  apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 $keyserver_options --recv-keys 0x219BD9C9
   echo 'deb http://repos.azulsystems.com/debian stable main' > /etc/apt/sources.list.d/zulu.list
   apt-get -y autoremove
   apt-get autoclean

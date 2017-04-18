@@ -42,15 +42,18 @@ from marvin.lib.base import (Domain,
 from marvin.lib.common import (get_domain,
                                get_template,
                                get_zone)
-from marvin.cloudstackAPI import restartVPC, listNuageUnderlayVlanIpRanges
+from marvin.cloudstackAPI import (restartVPC,
+                                  enableNuageUnderlayVlanIpRange,
+                                  disableNuageUnderlayVlanIpRange,
+                                  listNuageUnderlayVlanIpRanges)
 # Import System Modules
+from retry import retry
 import importlib
 import functools
 import logging
 import socket
-import sys
 import time
-from retry import retry
+import sys
 
 
 class needscleanup(object):
@@ -288,6 +291,31 @@ class nuageTestCase(cloudstackTestCase):
         self.debug("Cleanup complete!")
         return
 
+    # enable_NuageUnderlayPublicIpRange - Enables/configures underlay
+    # networking for the given public IP range in Nuage VSP
+    def enable_NuageUnderlayPublicIpRange(self, vlanid):
+        cmd = enableNuageUnderlayVlanIpRange. \
+            enableNuageUnderlayVlanIpRangeCmd()
+        cmd.id = vlanid
+        self.api_client.enableNuageUnderlayVlanIpRange(cmd)
+
+    # disable_NuageUnderlayPublicIpRange - Disables/de-configures underlay
+    # networking for the given public IP range in Nuage VSP
+    def disable_NuageUnderlayPublicIpRange(self, public_ip_range):
+        cmd = disableNuageUnderlayVlanIpRange. \
+            disableNuageUnderlayVlanIpRangeCmd()
+        cmd.id = public_ip_range.vlan.id
+        self.api_client.enableNuageUnderlayVlanIpRange(cmd)
+
+    # list_NuageUnderlayPublicIpRanges - Lists underlay networking
+    # enabled/configured public IP ranges in Nuage VSP
+    def list_NuageUnderlayPublicIpRanges(self, public_ip_range=None):
+        cmd = listNuageUnderlayVlanIpRanges.listNuageUnderlayVlanIpRangesCmd()
+        if public_ip_range:
+            cmd.id = public_ip_range.vlan.id
+        cmd.underlay = True
+        return self.api_client.listNuageUnderlayVlanIpRanges(cmd)
+
     # create_VpcOffering - Creates VPC offering
     @needscleanup
     def create_VpcOffering(cls, vpc_offering, suffix=None):
@@ -363,6 +391,7 @@ class nuageTestCase(cloudstackTestCase):
             testdata = cls.test_data["network"]
             testdata["name"] = "TestNet-" + gateway + "-" + str(nw_off.name)
             testdata["displaytext"] = "Test Network"
+            testdata["gateway"] = gateway
             testdata["netmask"] = netmask
         network = Network.create(cls.api_client,
                                  testdata,
@@ -370,7 +399,6 @@ class nuageTestCase(cloudstackTestCase):
                                  domainid=account.domainid,
                                  networkofferingid=nw_off.id,
                                  zoneid=cls.zone.id,
-                                 gateway=gateway,
                                  vpcid=vpc.id if vpc else cls.vpc.id
                                  if hasattr(cls, "vpc") else None,
                                  aclid=acl_list.id if acl_list else None
@@ -401,7 +429,7 @@ class nuageTestCase(cloudstackTestCase):
     # create_VM - Creates VM in the given network(s)
     @needscleanup
     def create_VM(cls, network_list, host_id=None, start_vm=True,
-                  testdata=None, account=None):
+                  testdata=None, account=None, keypair=None):
         network_ids = []
         if isinstance(network_list, list):
             for network in network_list:
@@ -423,7 +451,8 @@ class nuageTestCase(cloudstackTestCase):
                                    zoneid=cls.zone.id,
                                    networkids=network_ids,
                                    startvm=start_vm,
-                                   hostid=host_id
+                                   hostid=host_id,
+                                   keypair=keypair
                                    )
         cls.debug("Created VM with ID - %s in network(s) with ID(s) - %s"
                   % (vm.id, network_ids))
@@ -456,22 +485,22 @@ class nuageTestCase(cloudstackTestCase):
     def migrate_VM(self, vm):
         self.debug("Checking if a host is available for migration...")
         hosts = Host.listForMigration(self.api_client, virtualmachineid=vm.id)
-        self.assertEqual(isinstance(hosts, list), True,
-                         "List hosts should return a valid list"
-                         )
-        # Remove the host of current VM from the hosts list
-        vm_info = VirtualMachine.list(self.api_client, id=vm.id)[0]
-        hosts[:] = [host for host in hosts if host.id != vm_info.hostid]
-        if len(hosts) <= 0:
-            self.skipTest("No host available for migration. "
-                          "Test requires at-least 2 hosts")
-        host = hosts[0]
-        self.debug("Migrating VM with ID: %s to Host: %s" % (vm.id, host.id))
-        try:
-            vm.migrate(self.api_client, hostid=host.id)
-        except Exception as e:
-            self.fail("Failed to migrate instance, %s" % e)
-        self.debug("Migrated VM with ID: %s to Host: %s" % (vm.id, host.id))
+        if hosts:
+            self.assertEqual(isinstance(hosts, list), True,
+                             "List hosts should return a valid list"
+                             )
+            host = hosts[0]
+            self.debug("Migrating VM with ID: "
+                       "%s to Host: %s" % (vm.id, host.id))
+            try:
+                vm.migrate(self.api_client, hostid=host.id)
+            except Exception as e:
+                self.fail("Failed to migrate instance, %s" % e)
+            self.debug("Migrated VM with ID: "
+                       "%s to Host: %s" % (vm.id, host.id))
+        else:
+            self.debug("No host available for migration. "
+                       "Test requires at-least 2 hosts")
 
     # delete_VM - Deletes the given VM
     def delete_VM(self, vm, expunge=True):
@@ -984,10 +1013,10 @@ class nuageTestCase(cloudstackTestCase):
         expected_status = cs_object.state.upper() if not stopped \
             else "DELETE_PENDING"
         tries = 0
-        while (vsd_object.status != expected_status) and (tries < 10):
+        while (vsd_object.status != expected_status) and (tries < 120):
             self.debug("Waiting for the CloudStack object " + cs_object.name +
                        " to be fully resolved in VSD...")
-            time.sleep(30)
+            time.sleep(5)
             self.debug("Rechecking the CloudStack object " + cs_object.name +
                        " status in VSD...")
             vsd_object = self.vsd.get_vm(

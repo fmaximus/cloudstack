@@ -40,10 +40,19 @@ function cleanup_dev() {
   rm -f /lib/udev/rules.d/75-persistent-net-generator.rules
 }
 
+# Remove http_proxy environment variables
+function cleanup_proxy() {
+  echo "cleaning up proxy configuration"
+  rm -f /etc/wgetrc
+  sed -i -r  -e "/export https?_proxy/d" .bashrc
+}
+
+
 function cleanup() {
   cleanup_apt
   cleanup_dhcp
   cleanup_dev
+  cleanup_proxy
 }
 
 return 2>/dev/null || cleanup

@@ -33,10 +33,12 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
-
 import javax.annotation.PostConstruct;
 import javax.inject.Inject;
 import javax.naming.ConfigurationException;
+
+import org.apache.commons.collections.CollectionUtils;
+import org.apache.log4j.Logger;
 
 import org.apache.cloudstack.acl.ControlledEntity.ACLType;
 import org.apache.cloudstack.api.command.user.vpc.ListPrivateGatewaysCmd;
@@ -46,9 +48,6 @@ import org.apache.cloudstack.engine.orchestration.service.NetworkOrchestrationSe
 import org.apache.cloudstack.framework.config.ConfigDepot;
 import org.apache.cloudstack.framework.config.dao.ConfigurationDao;
 import org.apache.cloudstack.managed.context.ManagedContextRunnable;
-import org.apache.commons.collections.CollectionUtils;
-import org.apache.log4j.Logger;
-
 import com.cloud.configuration.Config;
 import com.cloud.configuration.ConfigurationManager;
 import com.cloud.configuration.Resource.ResourceType;
@@ -225,7 +224,7 @@ public class VpcManagerImpl extends ManagerBase implements VpcManager, VpcProvis
     private List<VpcProvider> vpcElements = null;
     private final List<Service> nonSupportedServices = Arrays.asList(Service.SecurityGroup, Service.Firewall);
     private final List<Provider> supportedProviders = Arrays.asList(Provider.VPCVirtualRouter, Provider.NiciraNvp, Provider.InternalLbVm, Provider.Netscaler,
-            Provider.JuniperContrailVpcRouter, Provider.Ovs, Provider.NuageVsp, Provider.BigSwitchBcf);
+            Provider.JuniperContrailVpcRouter, Provider.Ovs, Provider.NuageVsp, Provider.BigSwitchBcf, Provider.ConfigDrive);
 
     int _cleanupInterval;
     int _maxNetworks;
@@ -2265,9 +2264,12 @@ public class VpcManagerImpl extends ManagerBase implements VpcManager, VpcProvis
 
         // check permissions
         _accountMgr.checkAccess(caller, null, true, owner, vpc);
+        VpcOfferingVO vpcOffering = _vpcOffDao.findById(vpc.getVpcOfferingId());
 
         boolean isSourceNat = false;
-        if (getExistingSourceNatInVpc(owner.getId(), vpcId) == null) {
+        if (_vpcOffServiceDao.findByServiceProviderAndOfferingId(Service.SourceNat.getName(), Provider.VPCVirtualRouter.getName(), vpcOffering.getId()) == null) {
+            s_logger.debug("SourceNat in this VPC is not handled by VpcVirtualRouter. So, do not allocate source NAT");
+        } else if (getExistingSourceNatInVpc(owner.getId(), vpcId) == null) {
             isSourceNat = true;
         }
 

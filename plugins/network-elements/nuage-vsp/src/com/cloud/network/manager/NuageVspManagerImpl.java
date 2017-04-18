@@ -19,10 +19,9 @@
 
 package com.cloud.network.manager;
 
-import static com.cloud.agent.api.sync.SyncNuageVspCmsIdCommand.SyncType;
-
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -153,6 +152,8 @@ import com.cloud.utils.exception.CloudRuntimeException;
 import com.cloud.utils.fsm.StateListener;
 import com.cloud.utils.fsm.StateMachine2;
 
+import static com.cloud.agent.api.sync.SyncNuageVspCmsIdCommand.SyncType;
+
 public class NuageVspManagerImpl extends ManagerBase implements NuageVspManager, Configurable, StateListener<Status, Status.Event, Host> {
 
     private static final Logger s_logger = Logger.getLogger(NuageVspManagerImpl.class);
@@ -222,6 +223,7 @@ public class NuageVspManagerImpl extends ManagerBase implements NuageVspManager,
         Set<Network.Provider> nuageVspProviders = ImmutableSet.of(Network.Provider.NuageVsp);
         Set<Network.Provider> vrProviders = ImmutableSet.of(Network.Provider.VPCVirtualRouter);
         Set<Network.Provider> lbProviders = ImmutableSet.of(Network.Provider.InternalLbVm);
+        Set<Network.Provider> userdataProviders = ImmutableSet.of(Network.Provider.VPCVirtualRouter, Network.Provider.ConfigDrive);
         NUAGE_VSP_VPC_SERVICE_MAP = ImmutableMap.<Network.Service, Set<Network.Provider>>builder()
                 .put(Network.Service.Connectivity, nuageVspProviders)
                 .put(Network.Service.Gateway, nuageVspProviders)
@@ -229,7 +231,7 @@ public class NuageVspManagerImpl extends ManagerBase implements NuageVspManager,
                 .put(Network.Service.StaticNat, nuageVspProviders)
                 .put(Network.Service.SourceNat, nuageVspProviders)
                 .put(Network.Service.NetworkACL, nuageVspProviders)
-                .put(Network.Service.UserData, vrProviders)
+                .put(Network.Service.UserData, userdataProviders)
                 .put(Network.Service.Lb, lbProviders)
                 .put(Network.Service.Dns, vrProviders)
                 .build();
@@ -298,19 +300,15 @@ public class NuageVspManagerImpl extends ManagerBase implements NuageVspManager,
                 }
                 apiVersion = cmd.getApiVersion();
             } else {
-                boolean apiVersionFound = false;
-                Map<NuageVspApiVersion, NuageVspApiVersion.Status> supportedVersions = clientLoader.getNuageVspManagerClient().getSupportedVersions();
-                for (NuageVspApiVersion selectedVersion : supportedVersions.keySet()) {
-                    if (supportedVersions.get(selectedVersion) == NuageVspApiVersion.Status.CURRENT){
-                        apiVersion = selectedVersion.toString();
-                        apiVersionFound = true;
-                        break;
-                    }
-                }
+                List<NuageVspApiVersion> supportedVsdVersions = clientLoader.getNuageVspManagerClient().getSupportedVersionList();
+                supportedVsdVersions.retainAll(Arrays.asList(NuageVspApiVersion.SUPPORTED_VERSIONS));
 
-                if(!apiVersionFound) {
+                if(supportedVsdVersions.isEmpty()) {
                     throw new CloudRuntimeException("No supported API version found!");
                 }
+
+                supportedVsdVersions.sort(Comparator.reverseOrder());
+                apiVersion = supportedVsdVersions.get(0).toString();
             }
 
 

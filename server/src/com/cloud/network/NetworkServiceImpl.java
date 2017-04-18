@@ -35,9 +35,9 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.UUID;
-
 import javax.inject.Inject;
 import javax.naming.ConfigurationException;
+
 
 import org.apache.cloudstack.acl.ControlledEntity.ACLType;
 import org.apache.cloudstack.acl.SecurityChecker.AccessType;
@@ -2625,6 +2625,9 @@ public class NetworkServiceImpl extends ManagerBase implements  NetworkService {
             //Add Internal Load Balancer element as a default network service provider
             addDefaultInternalLbProviderToPhysicalNetwork(pNetwork.getId());
 
+            // Add the config drive provider
+            addConfigDriveToPhysicalNetwork(pNetwork.getId());
+
             return pNetwork;
                 }
             });
@@ -3940,13 +3943,13 @@ public class NetworkServiceImpl extends ManagerBase implements  NetworkService {
             addProviderToPhysicalNetwork(physicalNetworkId, "BaremetalUserdataProvider", null, null);
         } else if (dvo.getNetworkType() == NetworkType.Advanced) {
             addProviderToPhysicalNetwork(physicalNetworkId, "BaremetalPxeProvider", null, null);
-            enableBaremetalProvider("BaremetalPxeProvider");
+            enableProvider("BaremetalPxeProvider");
         }
 
         return null;
     }
 
-    private void enableBaremetalProvider(String providerName) {
+    private void enableProvider(String providerName) {
         QueryBuilder<PhysicalNetworkServiceProviderVO> q = QueryBuilder.create(PhysicalNetworkServiceProviderVO.class);
         q.and(q.entity().getProviderName(), SearchCriteria.Op.EQ, providerName);
         PhysicalNetworkServiceProviderVO provider = q.find();
@@ -3954,6 +3957,22 @@ public class NetworkServiceImpl extends ManagerBase implements  NetworkService {
         _pNSPDao.update(provider.getId(), provider);
     }
 
+    private PhysicalNetworkServiceProvider addConfigDriveToPhysicalNetwork(long physicalNetworkId) {
+        PhysicalNetworkVO pvo = _physicalNetworkDao.findById(physicalNetworkId);
+        DataCenterVO dvo = _dcDao.findById(pvo.getDataCenterId());
+        if (dvo.getNetworkType() == NetworkType.Advanced) {
+
+            Provider provider = Network.Provider.getProvider("ConfigDrive");
+            if (provider == null) {
+                return null;
+            }
+
+            addProviderToPhysicalNetwork(physicalNetworkId, Provider.ConfigDrive.getName(), null, null);
+            enableProvider(Provider.ConfigDrive.getName());
+        }
+        return null;
+
+    }
     protected boolean isNetworkSystem(Network network) {
         NetworkOffering no = _networkOfferingDao.findByIdIncludingRemoved(network.getNetworkOfferingId());
         if (no.isSystemOnly()) {
