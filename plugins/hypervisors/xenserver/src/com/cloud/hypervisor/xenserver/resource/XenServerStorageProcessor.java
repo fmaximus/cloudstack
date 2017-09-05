@@ -18,27 +18,18 @@
  */
 package com.cloud.hypervisor.xenserver.resource;
 
-import com.cloud.agent.api.Answer;
-import com.cloud.agent.api.to.DataObjectType;
-import com.cloud.agent.api.to.DataStoreTO;
-import com.cloud.agent.api.to.DataTO;
-import com.cloud.agent.api.to.DiskTO;
-import com.cloud.agent.api.to.NfsTO;
-import com.cloud.agent.api.to.S3TO;
-import com.cloud.agent.api.to.StorageFilerTO;
-import com.cloud.agent.api.to.SwiftTO;
-import com.cloud.exception.InternalErrorException;
-import com.cloud.hypervisor.Hypervisor.HypervisorType;
-import com.cloud.hypervisor.xenserver.resource.CitrixResourceBase.SRType;
-import com.cloud.storage.DataStoreRole;
-import com.cloud.storage.Storage;
-import com.cloud.storage.Storage.ImageFormat;
-import com.cloud.storage.resource.StorageProcessor;
-import com.cloud.utils.exception.CloudRuntimeException;
-import com.cloud.utils.storage.S3.ClientOptions;
-import com.cloud.utils.storage.encoding.DecodedDataObject;
-import com.cloud.utils.storage.encoding.DecodedDataStore;
-import com.cloud.utils.storage.encoding.Decoder;
+import java.io.File;
+import java.net.URI;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
+
+import org.apache.log4j.Logger;
+import org.apache.xmlrpc.XmlRpcException;
+
 import com.xensource.xenapi.Connection;
 import com.xensource.xenapi.Host;
 import com.xensource.xenapi.PBD;
@@ -50,6 +41,7 @@ import com.xensource.xenapi.Types.XenAPIException;
 import com.xensource.xenapi.VBD;
 import com.xensource.xenapi.VDI;
 import com.xensource.xenapi.VM;
+
 import org.apache.cloudstack.storage.command.AttachAnswer;
 import org.apache.cloudstack.storage.command.AttachCommand;
 import org.apache.cloudstack.storage.command.AttachPrimaryDataStoreAnswer;
@@ -73,17 +65,28 @@ import org.apache.cloudstack.storage.to.PrimaryDataStoreTO;
 import org.apache.cloudstack.storage.to.SnapshotObjectTO;
 import org.apache.cloudstack.storage.to.TemplateObjectTO;
 import org.apache.cloudstack.storage.to.VolumeObjectTO;
-import org.apache.log4j.Logger;
-import org.apache.xmlrpc.XmlRpcException;
 
-import java.io.File;
-import java.net.URI;
-import java.util.Arrays;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.UUID;
+import com.cloud.agent.api.Answer;
+import com.cloud.agent.api.to.DataObjectType;
+import com.cloud.agent.api.to.DataStoreTO;
+import com.cloud.agent.api.to.DataTO;
+import com.cloud.agent.api.to.DiskTO;
+import com.cloud.agent.api.to.NfsTO;
+import com.cloud.agent.api.to.S3TO;
+import com.cloud.agent.api.to.StorageFilerTO;
+import com.cloud.agent.api.to.SwiftTO;
+import com.cloud.exception.InternalErrorException;
+import com.cloud.hypervisor.Hypervisor.HypervisorType;
+import com.cloud.hypervisor.xenserver.resource.CitrixResourceBase.SRType;
+import com.cloud.storage.DataStoreRole;
+import com.cloud.storage.Storage;
+import com.cloud.storage.Storage.ImageFormat;
+import com.cloud.storage.resource.StorageProcessor;
+import com.cloud.utils.exception.CloudRuntimeException;
+import com.cloud.utils.storage.S3.ClientOptions;
+import com.cloud.utils.storage.encoding.DecodedDataObject;
+import com.cloud.utils.storage.encoding.DecodedDataStore;
+import com.cloud.utils.storage.encoding.Decoder;
 
 import static com.cloud.utils.ReflectUtil.flattenProperties;
 import static com.google.common.collect.Lists.newArrayList;
@@ -800,6 +803,11 @@ public class XenServerStorageProcessor implements StorageProcessor {
             return null;
         }
         return parentUuid;
+    }
+
+    @Override
+    public Answer copyConfigDriveToPrimaryStorage(CopyCommand cmd) {
+        return new CopyCmdAnswer("not implemented yet");
     }
 
     @Override

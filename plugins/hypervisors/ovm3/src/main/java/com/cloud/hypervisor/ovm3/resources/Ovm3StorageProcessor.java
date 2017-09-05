@@ -21,6 +21,8 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.UUID;
 
+import org.apache.log4j.Logger;
+
 import org.apache.cloudstack.storage.command.AttachAnswer;
 import org.apache.cloudstack.storage.command.AttachCommand;
 import org.apache.cloudstack.storage.command.CopyCmdAnswer;
@@ -38,7 +40,6 @@ import org.apache.cloudstack.storage.command.SnapshotAndCopyCommand;
 import org.apache.cloudstack.storage.to.SnapshotObjectTO;
 import org.apache.cloudstack.storage.to.TemplateObjectTO;
 import org.apache.cloudstack.storage.to.VolumeObjectTO;
-import org.apache.log4j.Logger;
 
 import com.cloud.agent.api.Answer;
 import com.cloud.agent.api.Command;
@@ -186,6 +187,11 @@ public class Ovm3StorageProcessor implements StorageProcessor {
             LOGGER.debug("CreateCommand failed", e);
             return new CreateAnswer(cmd, e.getMessage());
         }
+    }
+
+    @Override
+    public Answer copyConfigDriveToPrimaryStorage(CopyCommand cmd) {
+        return new CopyCmdAnswer("not implemented yet");
     }
 
     /**

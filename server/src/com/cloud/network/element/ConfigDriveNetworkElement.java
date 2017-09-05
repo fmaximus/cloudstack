@@ -212,8 +212,9 @@ public class ConfigDriveNetworkElement extends AdapterBase implements NetworkEle
     public boolean addPasswordAndUserdata(Network network, NicProfile nic, VirtualMachineProfile profile, DeployDestination dest, ReservationContext context)
             throws ConcurrentOperationException, InsufficientCapacityException, ResourceUnavailableException {
         UserVmDetailVO vmDetailSshKey = _userVmDetailsDao.findDetail(profile.getId(), "SSH.PublicKey");
-        return (canHandle(network.getTrafficType()) && updateConfigDrive(profile,
-                (vmDetailSshKey!=null?vmDetailSshKey.getValue():null)))
+        final String sshKey = vmDetailSshKey != null ? vmDetailSshKey.getValue() : null;
+        return canHandle(network.getTrafficType())
+                && updateConfigDrive(profile, sshKey)
                 && updateConfigDriveIso(network, profile, dest.getHost(), false);
     }
 
@@ -314,20 +315,29 @@ public class ConfigDriveNetworkElement extends AdapterBase implements NetworkEle
         }
 
         // Create/Update the iso on the secondary store
-        s_logger.debug(String.format("%s config drive ISO for  vm %s in host %s",
-                (update?"update":"create"), profile.getInstanceName(), _hostDao.findById(hostId).getName()));
+        if (s_logger.isDebugEnabled()) {
+            s_logger.debug(String.format("%s config drive ISO for vm %s in host %s",
+                                         (update ? "update" : "create"),
+                                         profile.getInstanceName(),
+                                         _hostDao.findById(hostId).getName()));
+        }
+
         EndPoint endpoint = _ep.select(secondaryStore);
-        if (endpoint == null )
+        if (endpoint == null) {
             throw new ResourceUnavailableException(String.format("%s failed, secondary store not available",
-                    (update?"Update":"Create")),secondaryStore.getClass(),secondaryStore.getId());
+                    (update?"Update":"Create")), secondaryStore.getClass(), secondaryStore.getId());
+        }
         String isoPath = CONFIGDRIVEDIR + "/" + profile.getInstanceName() + "/"  + CONFIGDRIVEFILENAME;
         HandleConfigDriveIsoCommand configDriveIsoCommand = new HandleConfigDriveIsoCommand(profile.getVmData(),
                 profile.getConfigDriveLabel(), secondaryStore.getTO(), isoPath, true, update);
         Answer createIsoAnswer = endpoint.sendMessage(configDriveIsoCommand);
         if (!createIsoAnswer.getResult()) {
             throw new ResourceUnavailableException(String.format("%s ISO failed, details: %s",
-                    (update?"Update":"Create"), createIsoAnswer.getDetails()),ConfigDriveNetworkElement.class,0L);
+                    (update?"Update":"Create"), createIsoAnswer.getDetails()),ConfigDriveNetworkElement.class, 0L);
         }
+
+        // Copy ConfigDrive to Primary Storage
+
         configureConfigDriveDisk(profile, secondaryStore);
 
         // Re-attach the ISO if the machine is running

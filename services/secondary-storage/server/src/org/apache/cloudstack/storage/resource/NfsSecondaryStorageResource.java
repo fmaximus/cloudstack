@@ -16,21 +16,6 @@
 // under the License.
 package org.apache.cloudstack.storage.resource;
 
-import static com.cloud.network.NetworkModel.CONFIGDATA_CONTENT;
-import static com.cloud.network.NetworkModel.CONFIGDATA_DIR;
-import static com.cloud.network.NetworkModel.CONFIGDATA_FILE;
-import static com.cloud.network.NetworkModel.METATDATA_DIR;
-import static com.cloud.network.NetworkModel.PASSWORD_DIR;
-import static com.cloud.network.NetworkModel.PASSWORD_FILE;
-import static com.cloud.network.NetworkModel.PUBLIC_KEYS_FILE;
-import static com.cloud.network.NetworkModel.USERDATA_DIR;
-import static com.cloud.network.NetworkModel.USERDATA_FILE;
-import static com.cloud.utils.StringUtils.join;
-import static com.cloud.utils.storage.S3.S3Utils.putFile;
-import static java.lang.String.format;
-import static java.util.Arrays.asList;
-import static org.apache.commons.lang.StringUtils.substringAfterLast;
-
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
 import java.io.File;
@@ -57,9 +42,20 @@ import java.util.UUID;
 
 import javax.naming.ConfigurationException;
 
-import com.google.gson.JsonArray;
-import com.google.gson.JsonElement;
-import com.google.gson.JsonObject;
+import io.netty.bootstrap.ServerBootstrap;
+import io.netty.channel.Channel;
+import io.netty.channel.ChannelInitializer;
+import io.netty.channel.ChannelPipeline;
+import io.netty.channel.EventLoopGroup;
+import io.netty.channel.nio.NioEventLoopGroup;
+import io.netty.channel.socket.SocketChannel;
+import io.netty.channel.socket.nio.NioServerSocketChannel;
+import io.netty.handler.codec.http.HttpContentCompressor;
+import io.netty.handler.codec.http.HttpRequestDecoder;
+import io.netty.handler.codec.http.HttpResponseEncoder;
+import io.netty.handler.logging.LogLevel;
+import io.netty.handler.logging.LoggingHandler;
+
 import org.apache.commons.codec.digest.DigestUtils;
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.io.FilenameUtils;
@@ -81,6 +77,9 @@ import com.google.common.collect.Maps;
 import com.google.common.io.Files;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
 
 import org.apache.cloudstack.framework.security.keystore.KeystoreManager;
 import org.apache.cloudstack.storage.command.CopyCmdAnswer;
@@ -170,19 +169,20 @@ import com.cloud.utils.script.Script;
 import com.cloud.utils.storage.S3.S3Utils;
 import com.cloud.vm.SecondaryStorageVm;
 
-import io.netty.bootstrap.ServerBootstrap;
-import io.netty.channel.Channel;
-import io.netty.channel.ChannelInitializer;
-import io.netty.channel.ChannelPipeline;
-import io.netty.channel.EventLoopGroup;
-import io.netty.channel.nio.NioEventLoopGroup;
-import io.netty.channel.socket.SocketChannel;
-import io.netty.channel.socket.nio.NioServerSocketChannel;
-import io.netty.handler.codec.http.HttpContentCompressor;
-import io.netty.handler.codec.http.HttpRequestDecoder;
-import io.netty.handler.codec.http.HttpResponseEncoder;
-import io.netty.handler.logging.LogLevel;
-import io.netty.handler.logging.LoggingHandler;
+import static com.cloud.network.NetworkModel.CONFIGDATA_CONTENT;
+import static com.cloud.network.NetworkModel.CONFIGDATA_DIR;
+import static com.cloud.network.NetworkModel.CONFIGDATA_FILE;
+import static com.cloud.network.NetworkModel.METATDATA_DIR;
+import static com.cloud.network.NetworkModel.PASSWORD_DIR;
+import static com.cloud.network.NetworkModel.PASSWORD_FILE;
+import static com.cloud.network.NetworkModel.PUBLIC_KEYS_FILE;
+import static com.cloud.network.NetworkModel.USERDATA_DIR;
+import static com.cloud.network.NetworkModel.USERDATA_FILE;
+import static com.cloud.utils.StringUtils.join;
+import static com.cloud.utils.storage.S3.S3Utils.putFile;
+import static java.lang.String.format;
+import static java.util.Arrays.asList;
+import static org.apache.commons.lang.StringUtils.substringAfterLast;
 
 public class NfsSecondaryStorageResource extends ServerResourceBase implements SecondaryStorageResource {
 
@@ -325,59 +325,73 @@ public class NfsSecondaryStorageResource extends ServerResourceBase implements S
     }
 
     private Answer execute(HandleConfigDriveIsoCommand cmd) {
+        DataStoreTO dstore = cmd.getDestStore();
+        if (dstore instanceof NfsTO) {
+            NfsTO nfs = (NfsTO) dstore;
 
-        if (cmd.isCreate()) {
-            s_logger.debug(String.format("VMdata %s, attach = %s", cmd.getVmData(), cmd.isCreate()));
-            if(cmd.getVmData() == null) return new Answer(cmd, false, "No Vmdata available");
-            String nfsMountPoint = getRootDir(cmd.getDestStore().getUrl(), _nfsVersion);
-            File isoFile = new File(nfsMountPoint, cmd.getIsoFile());
-            if(isoFile.exists()) {
-                if (!cmd.isUpdate()) {
-                    return new Answer(cmd, true, "ISO already available");
-                } else {
-                    // Find out if we have to recover the password/ssh-key from the already available ISO.
-                    try {
-                        List<String[]> recoveredVmData = recoverVmData(isoFile);
-                        for (String[] vmDataEntry : cmd.getVmData()) {
-                            if (updatableConfigData.containsKey(vmDataEntry[CONFIGDATA_FILE])
-                                    && updatableConfigData.get(vmDataEntry[CONFIGDATA_FILE]).equals(vmDataEntry[CONFIGDATA_DIR])) {
-                                   updateVmData(recoveredVmData, vmDataEntry);
-                            }
+            if (cmd.isCreate()) {
+                s_logger.debug(String.format("VMdata %s, attach = %s", cmd.getVmData(), cmd.isCreate()));
+                if (cmd.getVmData() == null) return new Answer(cmd, false, "No Vmdata available");
+                String nfsMountPoint = getRootDir(nfs.getUrl(), _nfsVersion);
+                File isoFile = new File(nfsMountPoint, cmd.getIsoFile());
+                if (isoFile.exists()) {
+                    if (cmd.isUpdate()) {
+                        // Find out if we have to recover the password/ssh-key from the already available ISO.
+                        try {
+                            List<String[]> recoveredVmData = recoverVmData(isoFile);
+                            updateVmData(recoveredVmData, cmd.getVmData());
+                            cmd.setVmData(recoveredVmData);
+                        } catch (IOException e) {
+                            return new Answer(cmd, e);
                         }
-                        cmd.setVmData(recoveredVmData);
-                    } catch (IOException e) {
-                        return new Answer(cmd, e);
+                    } else {
+                        return new Answer(cmd, true, "ISO already available");
                     }
                 }
-            }
-            return createConfigDriveIsoForVM(cmd);
-        } else {
-            DataStoreTO dstore = cmd.getDestStore();
-            if (dstore instanceof NfsTO) {
-                NfsTO nfs = (NfsTO) dstore;
-                String relativeTemplatePath = new File(cmd.getIsoFile()).getParent();
-                String nfsMountPoint = getRootDir(nfs.getUrl(), _nfsVersion);
-                File tmpltPath = new File(nfsMountPoint, relativeTemplatePath);
-                try {
-                    FileUtils.deleteDirectory(tmpltPath);
-                } catch (IOException e) {
-                    return new Answer(cmd, e);
-                }
-                return new Answer(cmd);
+                return createConfigDriveIsoForVM(cmd);
             } else {
-                return new Answer(cmd, false, "Not implemented yet");
+                return deleteConfigDriveForVM(cmd, nfs);
+            }
+        } else {
+            return new Answer(cmd, false, "Not implemented yet");
+        }
+    }
+
+    private Answer deleteConfigDriveForVM(HandleConfigDriveIsoCommand cmd, NfsTO nfs) {
+        String relativeTemplatePath = new File(cmd.getIsoFile()).getParent();
+        String nfsMountPoint = getRootDir(nfs.getUrl(), _nfsVersion);
+        File tmpltPath = new File(nfsMountPoint, relativeTemplatePath);
+        try {
+            FileUtils.deleteDirectory(tmpltPath);
+        } catch (IOException e) {
+            return new Answer(cmd, e);
+        }
+        return new Answer(cmd);
+    }
+
+    private void updateVmData(List<String[]> recoveredVmData, List<String[]> vmData) {
+        for (String[] vmDataEntry : vmData) {
+            final String fileName = vmDataEntry[CONFIGDATA_FILE];
+            final String directory = vmDataEntry[CONFIGDATA_DIR];
+
+            if (directory.equals(updatableConfigData.get(fileName))) {
+                updateVmData(recoveredVmData, vmDataEntry);
             }
         }
     }
 
     private void updateVmData(List<String[]> recoveredVmData, String[] vmDataEntry) {
+        final String fileName = vmDataEntry[CONFIGDATA_FILE];
+        final String directory = vmDataEntry[CONFIGDATA_DIR];
+
         for (String[] recoveredEntry : recoveredVmData) {
-            if (recoveredEntry[CONFIGDATA_DIR].equals(vmDataEntry[CONFIGDATA_DIR])
-                    && recoveredEntry[CONFIGDATA_FILE].equals(vmDataEntry[CONFIGDATA_FILE])) {
+            if (recoveredEntry[CONFIGDATA_DIR].equals(fileName)
+                    && recoveredEntry[CONFIGDATA_FILE].equals(directory)) {
                 recoveredEntry[CONFIGDATA_CONTENT] = vmDataEntry[CONFIGDATA_CONTENT];
                 return;
             }
         }
+
         recoveredVmData.add(vmDataEntry);
     }
 
@@ -422,10 +436,13 @@ public class NfsSecondaryStorageResource extends ServerResourceBase implements S
                     s_logger.warn("Unable to umount " + tempDirName + " due to " + result);
                 }
             }
-            try {
-                FileUtils.deleteDirectory(new File(tempDirName));
-            } catch (IOException ioe) {
-                s_logger.warn("Failed to delete ConfigDrive temporary directory: " + tempDirName, ioe);
+
+            if (tempDirName != null) {
+                try {
+                    FileUtils.deleteDirectory(new File(tempDirName));
+                } catch (IOException ioe) {
+                    s_logger.warn("Failed to delete ConfigDrive temporary directory: " + tempDirName, ioe);
+                }
             }
         }
         return  recoveredVmData;
@@ -445,20 +462,8 @@ public class NfsSecondaryStorageResource extends ServerResourceBase implements S
                 //create folder with empty files
                 File openStackFolder = new File(tempDirName + openStackConfigDriveName);
                 if (openStackFolder.exists() || openStackFolder.mkdirs()) {
-                    File vendorDataFile = new File(openStackFolder,"vendor_data.json");
-                    try (FileWriter fw = new FileWriter(vendorDataFile); BufferedWriter bw = new BufferedWriter(fw)) {
-                        bw.write("{}");
-                    } catch (IOException ex) {
-                        s_logger.error("Failed to create file ", ex);
-                        return new Answer(cmd, ex);
-                    }
-                    File networkDataFile = new File(openStackFolder, "network_data.json");
-                    try (FileWriter fw = new FileWriter(networkDataFile); BufferedWriter bw = new BufferedWriter(fw)) {
-                        bw.write("{}");
-                    } catch (IOException ex) {
-                        s_logger.error("Failed to create file ", ex);
-                        return new Answer(cmd, ex);
-                    }
+                    writeEmptyJsonFile(openStackFolder, "vendor_data.json");
+                    writeEmptyJsonFile(openStackFolder, "network_data.json");
                 } else {
                     s_logger.error("Failed to create folder " + openStackFolder);
                     return new Answer(cmd, false, "Failed to create folder " + openStackFolder);
@@ -478,13 +483,7 @@ public class NfsSecondaryStorageResource extends ServerResourceBase implements S
                         File typeFolder = new File(tempDirName + cloudStackConfigDriveName + dataType);
                         if (typeFolder.exists() || typeFolder.mkdirs()) {
                             if (StringUtils.isNotEmpty(content)) {
-                                File file = new File(typeFolder, fileName + ".txt");
-                                try (FileWriter fw = new FileWriter(file); BufferedWriter bw = new BufferedWriter(fw)) {
-                                    bw.write(content);
-                                } catch (IOException ex) {
-                                    s_logger.error("Failed to create file ", ex);
-                                    return new Answer(cmd, ex);
-                                }
+                                writeFile(typeFolder, fileName + ".txt", content);
                             }
                         } else {
                             s_logger.error("Failed to create folder " + typeFolder);
@@ -492,17 +491,11 @@ public class NfsSecondaryStorageResource extends ServerResourceBase implements S
                         }
 
                         //now write the file to the OpenStack directory
-                        metaData = constructOpenStackMetaData(metaData, dataType, fileName, content);
+                        constructOpenStackMetaData(metaData, dataType, fileName, content);
                     }
                 }
 
-                File metaDataFile = new File(openStackFolder, "meta_data.json");
-                try (FileWriter fw = new FileWriter(metaDataFile); BufferedWriter bw = new BufferedWriter(fw)) {
-                    bw.write(metaData.toString());
-                } catch (IOException ex) {
-                    s_logger.error("Failed to create file ", ex);
-                    return new Answer(cmd, ex);
-                }
+                writeFile(openStackFolder, "meta_data.json", metaData.toString());
 
                 String linkResult = linkUserData(tempDirName);
                 if (linkResult != null) {
@@ -549,7 +542,21 @@ public class NfsSecondaryStorageResource extends ServerResourceBase implements S
         return new Answer(cmd);
     }
 
-    JsonObject constructOpenStackMetaData(JsonObject metaData, String dataType, String fileName, String content) {
+    private void writeEmptyJsonFile(File directory, String fileName) throws IOException {
+        writeFile(directory, fileName, "{}");
+    }
+
+    private void writeFile(File directory, String fileName, String content) throws IOException {
+        File file = new File(directory, fileName);
+        try (FileWriter fw = new FileWriter(file); BufferedWriter bw = new BufferedWriter(fw)) {
+            bw.write(content);
+        } catch (IOException ex) {
+            s_logger.error("Failed to create file ", ex);
+            throw ex;
+        }
+    }
+
+    void constructOpenStackMetaData(JsonObject metaData, String dataType, String fileName, String content) {
         if (dataType.equals(NetworkModel.METATDATA_DIR) &&  StringUtils.isNotEmpty(content)) {
             //keys are a special case in OpenStack format
             if (NetworkModel.PUBLIC_KEYS_FILE.equals(fileName)) {
@@ -572,7 +579,6 @@ public class NfsSecondaryStorageResource extends ServerResourceBase implements S
                     metaData.addProperty(NetworkModel.openStackFileMapping.get(fileName), content);
             }
         }
-        return metaData;
     }
 
     private static JsonArray arrayOf(JsonElement... elements) {

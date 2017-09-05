@@ -18,8 +18,6 @@
  */
 package com.cloud.hypervisor.kvm.storage;
 
-import static com.cloud.utils.storage.S3.S3Utils.putFile;
-
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
@@ -35,6 +33,22 @@ import java.util.Map;
 import java.util.UUID;
 
 import javax.naming.ConfigurationException;
+
+import org.apache.commons.io.FileUtils;
+import org.apache.log4j.Logger;
+import org.libvirt.Connect;
+import org.libvirt.Domain;
+import org.libvirt.DomainInfo;
+import org.libvirt.DomainSnapshot;
+import org.libvirt.LibvirtException;
+
+import com.ceph.rados.IoCTX;
+import com.ceph.rados.Rados;
+import com.ceph.rados.exceptions.ErrorCode;
+import com.ceph.rados.exceptions.RadosException;
+import com.ceph.rbd.Rbd;
+import com.ceph.rbd.RbdException;
+import com.ceph.rbd.RbdImage;
 
 import org.apache.cloudstack.storage.command.AttachAnswer;
 import org.apache.cloudstack.storage.command.AttachCommand;
@@ -59,21 +73,7 @@ import org.apache.cloudstack.utils.qemu.QemuImg;
 import org.apache.cloudstack.utils.qemu.QemuImg.PhysicalDiskFormat;
 import org.apache.cloudstack.utils.qemu.QemuImgException;
 import org.apache.cloudstack.utils.qemu.QemuImgFile;
-import org.apache.commons.io.FileUtils;
-import org.apache.log4j.Logger;
-import org.libvirt.Connect;
-import org.libvirt.Domain;
-import org.libvirt.DomainInfo;
-import org.libvirt.DomainSnapshot;
-import org.libvirt.LibvirtException;
 
-import com.ceph.rados.IoCTX;
-import com.ceph.rados.Rados;
-import com.ceph.rados.exceptions.ErrorCode;
-import com.ceph.rados.exceptions.RadosException;
-import com.ceph.rbd.Rbd;
-import com.ceph.rbd.RbdException;
-import com.ceph.rbd.RbdImage;
 import com.cloud.agent.api.Answer;
 import com.cloud.agent.api.storage.PrimaryStorageDownloadAnswer;
 import com.cloud.agent.api.to.DataObjectType;
@@ -101,9 +101,11 @@ import com.cloud.storage.template.Processor.FormatInfo;
 import com.cloud.storage.template.QCOW2Processor;
 import com.cloud.storage.template.TemplateLocation;
 import com.cloud.utils.NumbersUtil;
-import com.cloud.utils.storage.S3.S3Utils;
 import com.cloud.utils.exception.CloudRuntimeException;
 import com.cloud.utils.script.Script;
+import com.cloud.utils.storage.S3.S3Utils;
+
+import static com.cloud.utils.storage.S3.S3Utils.putFile;
 
 public class KVMStorageProcessor implements StorageProcessor {
     private static final Logger s_logger = Logger.getLogger(KVMStorageProcessor.class);
@@ -159,6 +161,59 @@ public class KVMStorageProcessor implements StorageProcessor {
         s_logger.info("'ResignatureAnswer resignature(ResignatureCommand)' not currently used for KVMStorageProcessor");
 
         return new ResignatureAnswer();
+    }
+
+    @Override
+    public Answer copyConfigDriveToPrimaryStorage(CopyCommand cmd) {
+        final DataTO srcData = cmd.getSrcTO();
+        final DataTO destData = cmd.getDestTO();
+        final TemplateObjectTO template = (TemplateObjectTO)srcData;
+        final DataStoreTO imageStore = template.getDataStore();
+        final PrimaryDataStoreTO primaryStore = (PrimaryDataStoreTO)destData.getDataStore();
+
+        if (!(imageStore instanceof NfsTO)) {
+            return new CopyCmdAnswer("unsupported protocol");
+        }
+
+        final NfsTO nfsImageStore = (NfsTO)imageStore;
+        final String tmplturl = nfsImageStore.getUrl() + File.separator + template.getPath();
+        final int index = tmplturl.lastIndexOf("/");
+        final String mountpoint = tmplturl.substring(0, index);
+        String tmpltname = null;
+        if (index < tmplturl.length() - 1) {
+            tmpltname = tmplturl.substring(index + 1);
+        }
+
+        KVMPhysicalDisk tmplVol;
+        KVMStoragePool secondaryPool = null;
+
+        try {
+            secondaryPool = storagePoolMgr.getStoragePoolByURI(mountpoint);
+            final KVMStoragePool primaryPool = storagePoolMgr.getStoragePool(primaryStore.getPoolType(), primaryStore.getUuid());
+
+            tmplVol = secondaryPool.getPhysicalDisk(tmpltname);
+            tmplVol.setFormat(PhysicalDiskFormat.DIR);
+
+            final TemplateObjectTO destTempl = (TemplateObjectTO)destData;
+            KVMPhysicalDisk primaryVol = storagePoolMgr.copyPhysicalDisk(tmplVol, destTempl.getUuid(), primaryPool, cmd.getWaitInMillSeconds());
+
+            TemplateObjectTO newConfigDrive = new TemplateObjectTO();
+            newConfigDrive.setPath(primaryVol.getName());
+            newConfigDrive.setSize(primaryVol.getSize());
+            newConfigDrive.setFormat(ImageFormat.ISO);
+            return new CopyCmdAnswer(newConfigDrive);
+        } catch (final CloudRuntimeException e) {
+            return new CopyCmdAnswer(e.toString());
+        } finally {
+            try {
+                if (secondaryPool != null) {
+                    secondaryPool.delete();
+                }
+            } catch(final Exception e) {
+                s_logger.debug("Failed to clean up secondary storage", e);
+            }
+        }
+
     }
 
     @Override

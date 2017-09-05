@@ -32,6 +32,8 @@ import org.apache.cloudstack.storage.command.SnapshotAndCopyCommand;
 import com.cloud.agent.api.Answer;
 
 public interface StorageProcessor {
+    public Answer copyConfigDriveToPrimaryStorage(CopyCommand cmd);
+
     public Answer copyTemplateToPrimaryStorage(CopyCommand cmd);
 
     public Answer cloneVolumeFromBaseTemplate(CopyCommand cmd);

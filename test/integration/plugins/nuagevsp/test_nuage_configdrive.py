@@ -20,7 +20,7 @@
     ConfigDrive and Nuage VSP SDN plugin
 """
 # Import Local Modules
-from nuageTestCase import nuageTestCase
+from nuageTestCase import nuageTestCase, all_zones
 from marvin.cloudstackAPI import updateTemplate, resetSSHKeyForVirtualMachine
 from marvin.lib.base import (Account,
                              createVlanIpRange,
@@ -660,9 +660,10 @@ class TestNuageConfigDrive(nuageTestCase):
         return addedsubnet
 
     @attr(tags=["advanced", "nuagevsp", "isonw"], required_hardware="true")
+    @all_zones
     def test_nuage_configdrive_isolated_network(self):
-        """Test Configdrive as provider for isolated Networks
-           to provide userdata and password reset functionality
+        """Test ConfigDrive as provider for isolated Networks
+           to provide user data and password reset functionality
            with Nuage VSP SDN plugin
         """
 

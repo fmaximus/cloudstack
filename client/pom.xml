@@ -25,6 +25,10 @@
       <id>juniper-contrail</id>
       <url>http://juniper.github.io/contrail-maven/snapshots</url>
     </repository>
+    <repository>
+      <id>nuage-vsp</id>
+      <url>http://cs.mv.nuagenetworks.net/releases/</url>
+    </repository>
   </repositories>
 
   <dependencies>

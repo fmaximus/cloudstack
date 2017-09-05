@@ -83,6 +83,11 @@ public class StorageSubsystemCommandHandlerBase implements StorageSubsystemComma
             destData.getDataStore().getRole() == DataStoreRole.Primary) {
             //copy template to primary storage
             return processor.copyTemplateToPrimaryStorage(cmd);
+        } else if (srcData.getObjectType() == DataObjectType.CONFIG_DRIVE &&
+                (srcData.getDataStore().getRole() == DataStoreRole.Image || srcData.getDataStore().getRole() == DataStoreRole.ImageCache) &&
+                destData.getDataStore().getRole() == DataStoreRole.Primary) {
+            //copy template to primary storage
+            return processor.copyConfigDriveToPrimaryStorage(cmd);
         } else if (srcData.getObjectType() == DataObjectType.TEMPLATE && srcDataStore.getRole() == DataStoreRole.Primary &&
             destDataStore.getRole() == DataStoreRole.Primary) {
             //clone template to a volume
